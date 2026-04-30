@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <ApplicationIcon>Assets\Keylet.ico</ApplicationIcon>
+    <AssemblyName>Keylet</AssemblyName>
+    <Product>Keylet</Product>
+    <Description>A playful full-screen typing app for children.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\Keylet.ico" />
+  </ItemGroup>
+</Project>
