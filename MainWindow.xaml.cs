@@ -42,6 +42,21 @@ public partial class MainWindow : Window
     private const int VK_LSHIFT = 0xA0;
     private const int VK_RSHIFT = 0xA1;
     private const int VK_CAPITAL = 0x14;
+    private const uint SPI_GETSTICKYKEYS = 0x003A;
+    private const uint SPI_SETSTICKYKEYS = 0x003B;
+    private const uint SPI_GETTOGGLEKEYS = 0x0034;
+    private const uint SPI_SETTOGGLEKEYS = 0x0035;
+    private const uint SPI_GETFILTERKEYS = 0x0032;
+    private const uint SPI_SETFILTERKEYS = 0x0033;
+    private const uint SKF_STICKYKEYSON = 0x00000001;
+    private const uint SKF_HOTKEYACTIVE = 0x00000004;
+    private const uint SKF_CONFIRMHOTKEY = 0x00000008;
+    private const uint TKF_TOGGLEKEYSON = 0x00000001;
+    private const uint TKF_HOTKEYACTIVE = 0x00000004;
+    private const uint TKF_CONFIRMHOTKEY = 0x00000008;
+    private const uint FKF_FILTERKEYSON = 0x00000001;
+    private const uint FKF_HOTKEYACTIVE = 0x00000004;
+    private const uint FKF_CONFIRMHOTKEY = 0x00000008;
 
     private static readonly Brush[] Palette =
     [
@@ -59,6 +74,10 @@ public partial class MainWindow : Window
     private readonly LowLevelKeyboardProc _keyboardProc;
     private IntPtr _keyboardHook;
     private int _colorIndex;
+    private StickyKeys _startupStickyKeys;
+    private ToggleKeys _startupToggleKeys;
+    private FilterKeys _startupFilterKeys;
+    private bool _hasAccessibilitySnapshot;
 
     public MainWindow()
     {
@@ -73,6 +92,9 @@ public partial class MainWindow : Window
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        CaptureAccessibilitySettings();
+        SetAccessibilityHotkeysEnabled(false);
+
         Show();
         WindowState = WindowState.Maximized;
         Topmost = true;
@@ -82,7 +104,6 @@ public partial class MainWindow : Window
 
         Dispatcher.BeginInvoke(() =>
         {
-            Topmost = false;
             Topmost = true;
             Activate();
             Focus();
@@ -91,6 +112,8 @@ public partial class MainWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        SetAccessibilityHotkeysEnabled(true);
+
         if (_keyboardHook != IntPtr.Zero)
         {
             UnhookWindowsHookEx(_keyboardHook);
@@ -326,6 +349,62 @@ public partial class MainWindow : Window
 
     private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 
+    private void CaptureAccessibilitySettings()
+    {
+        _startupStickyKeys = StickyKeys.Create();
+        _startupToggleKeys = ToggleKeys.Create();
+        _startupFilterKeys = FilterKeys.Create();
+
+        bool stickyOk = SystemParametersInfo(SPI_GETSTICKYKEYS, (uint)Marshal.SizeOf<StickyKeys>(), ref _startupStickyKeys, 0);
+        bool toggleOk = SystemParametersInfo(SPI_GETTOGGLEKEYS, (uint)Marshal.SizeOf<ToggleKeys>(), ref _startupToggleKeys, 0);
+        bool filterOk = SystemParametersInfo(SPI_GETFILTERKEYS, (uint)Marshal.SizeOf<FilterKeys>(), ref _startupFilterKeys, 0);
+        _hasAccessibilitySnapshot = stickyOk && toggleOk && filterOk;
+    }
+
+    private void SetAccessibilityHotkeysEnabled(bool enabled)
+    {
+        if (!_hasAccessibilitySnapshot)
+        {
+            return;
+        }
+
+        if (enabled)
+        {
+            StickyKeys stickyRestore = _startupStickyKeys;
+            ToggleKeys toggleRestore = _startupToggleKeys;
+            FilterKeys filterRestore = _startupFilterKeys;
+
+            SystemParametersInfo(SPI_SETSTICKYKEYS, (uint)Marshal.SizeOf<StickyKeys>(), ref stickyRestore, 0);
+            SystemParametersInfo(SPI_SETTOGGLEKEYS, (uint)Marshal.SizeOf<ToggleKeys>(), ref toggleRestore, 0);
+            SystemParametersInfo(SPI_SETFILTERKEYS, (uint)Marshal.SizeOf<FilterKeys>(), ref filterRestore, 0);
+            return;
+        }
+
+        StickyKeys stickyOff = _startupStickyKeys;
+        if ((stickyOff.dwFlags & SKF_STICKYKEYSON) == 0)
+        {
+            stickyOff.dwFlags &= ~SKF_HOTKEYACTIVE;
+            stickyOff.dwFlags &= ~SKF_CONFIRMHOTKEY;
+            SystemParametersInfo(SPI_SETSTICKYKEYS, (uint)Marshal.SizeOf<StickyKeys>(), ref stickyOff, 0);
+        }
+
+        ToggleKeys toggleOff = _startupToggleKeys;
+        if ((toggleOff.dwFlags & TKF_TOGGLEKEYSON) == 0)
+        {
+            toggleOff.dwFlags &= ~TKF_HOTKEYACTIVE;
+            toggleOff.dwFlags &= ~TKF_CONFIRMHOTKEY;
+            SystemParametersInfo(SPI_SETTOGGLEKEYS, (uint)Marshal.SizeOf<ToggleKeys>(), ref toggleOff, 0);
+        }
+
+        FilterKeys filterOff = _startupFilterKeys;
+        if ((filterOff.dwFlags & FKF_FILTERKEYSON) == 0)
+        {
+            filterOff.dwFlags &= ~FKF_HOTKEYACTIVE;
+            filterOff.dwFlags &= ~FKF_CONFIRMHOTKEY;
+            SystemParametersInfo(SPI_SETFILTERKEYS, (uint)Marshal.SizeOf<FilterKeys>(), ref filterOff, 0);
+        }
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct KbdLlHookStruct
     {
@@ -334,6 +413,55 @@ public partial class MainWindow : Window
         public uint flags;
         public uint time;
         public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct StickyKeys
+    {
+        public uint cbSize;
+        public uint dwFlags;
+
+        public static StickyKeys Create()
+        {
+            return new StickyKeys
+            {
+                cbSize = (uint)Marshal.SizeOf<StickyKeys>(),
+            };
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ToggleKeys
+    {
+        public uint cbSize;
+        public uint dwFlags;
+
+        public static ToggleKeys Create()
+        {
+            return new ToggleKeys
+            {
+                cbSize = (uint)Marshal.SizeOf<ToggleKeys>(),
+            };
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FilterKeys
+    {
+        public uint cbSize;
+        public uint dwFlags;
+        public uint iWaitMSec;
+        public uint iDelayMSec;
+        public uint iRepeatMSec;
+        public uint iBounceMSec;
+
+        public static FilterKeys Create()
+        {
+            return new FilterKeys
+            {
+                cbSize = (uint)Marshal.SizeOf<FilterKeys>(),
+            };
+        }
     }
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -371,4 +499,16 @@ public partial class MainWindow : Window
         int cchBuff,
         uint wFlags,
         IntPtr dwhkl);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, ref StickyKeys pvParam, uint fWinIni);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, ref ToggleKeys pvParam, uint fWinIni);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, ref FilterKeys pvParam, uint fWinIni);
 }
