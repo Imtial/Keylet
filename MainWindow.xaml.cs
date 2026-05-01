@@ -42,6 +42,8 @@ public partial class MainWindow : Window
     private const int VK_LSHIFT = 0xA0;
     private const int VK_RSHIFT = 0xA1;
     private const int VK_CAPITAL = 0x14;
+    private const int VK_T = 0x54;
+    private const int VK_9 = 0x39;
     private const uint SPI_GETSTICKYKEYS = 0x003A;
     private const uint SPI_SETSTICKYKEYS = 0x003B;
     private const uint SPI_GETTOGGLEKEYS = 0x0034;
@@ -193,7 +195,7 @@ public partial class MainWindow : Window
 
     private bool IsParentExit(int vkCode)
     {
-        return vkCode == 'Q' && IsControlDown() && IsAltDown() && IsShiftDown();
+        return (vkCode == VK_T || vkCode == VK_9) && IsControlDown() && IsAltDown() && IsPressed(VK_T) && IsPressed(VK_9);
     }
 
     private bool IsBlockedSystemKey(int vkCode)
