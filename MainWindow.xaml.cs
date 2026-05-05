@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.ComponentModel;
+using System.IO;
 using Microsoft.Win32;
 using System.Runtime.InteropServices;
 using System.Security;
@@ -8,6 +9,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Documents;
+using System.Windows.Media.Imaging;
 using System.Windows.Media;
 using System.Windows.Threading;
 
@@ -48,6 +50,7 @@ public partial class MainWindow : Window
     private const int VK_RSHIFT = 0xA1;
     private const int VK_CAPITAL = 0x14;
     private const int VK_T = 0x54;
+    private const int VK_0 = 0x30;
     private const int VK_9 = 0x39;
     private const uint SPI_GETSTICKYKEYS = 0x003A;
     private const uint SPI_SETSTICKYKEYS = 0x003B;
@@ -75,12 +78,22 @@ public partial class MainWindow : Window
         new SolidColorBrush(Color.FromRgb(181, 131, 255)),
         new SolidColorBrush(Color.FromRgb(144, 224, 239)),
     ];
+    private static readonly (Color Start, Color Mid, Color End)[] BackgroundThemes =
+    [
+        (Color.FromRgb(20, 10, 38), Color.FromRgb(13, 33, 61), Color.FromRgb(11, 44, 34)),
+        (Color.FromRgb(27, 14, 45), Color.FromRgb(20, 44, 74), Color.FromRgb(17, 50, 36)),
+        (Color.FromRgb(42, 16, 35), Color.FromRgb(16, 45, 75), Color.FromRgb(18, 59, 39)),
+        (Color.FromRgb(14, 20, 52), Color.FromRgb(11, 46, 71), Color.FromRgb(25, 52, 33)),
+        (Color.FromRgb(34, 16, 26), Color.FromRgb(20, 39, 68), Color.FromRgb(21, 56, 44)),
+    ];
 
     private readonly List<Inline> _typedInlines = [];
     private readonly HashSet<int> _pressedKeys = [];
     private readonly LowLevelKeyboardProc _keyboardProc;
     private IntPtr _keyboardHook;
     private int _colorIndex;
+    private int _backgroundThemeIndex = -1;
+    private readonly Random _random = new();
     private StickyKeys _startupStickyKeys;
     private ToggleKeys _startupToggleKeys;
     private FilterKeys _startupFilterKeys;
@@ -129,6 +142,8 @@ public partial class MainWindow : Window
             Close();
             return;
         }
+
+        ApplyNextBackgroundTheme(forceDifferent: false);
 
         Dispatcher.BeginInvoke(() =>
         {
@@ -268,6 +283,12 @@ public partial class MainWindow : Window
             return 1;
         }
 
+        if (isKeyDown && IsScreenshotShortcut(vkCode))
+        {
+            Dispatcher.BeginInvoke(async () => await CaptureAndSaveScreenshotAsync(), DispatcherPriority.Background);
+            return 1;
+        }
+
         if (isKeyDown)
         {
             HandleKeyDown(vkCode, info.scanCode);
@@ -307,6 +328,11 @@ public partial class MainWindow : Window
     private bool IsParentExit(int vkCode)
     {
         return (vkCode == VK_T || vkCode == VK_9) && IsControlDown() && IsAltDown() && IsPressed(VK_T) && IsPressed(VK_9);
+    }
+
+    private bool IsScreenshotShortcut(int vkCode)
+    {
+        return (vkCode == VK_T || vkCode == VK_0) && IsControlDown() && IsAltDown() && IsPressed(VK_T) && IsPressed(VK_0);
     }
 
     private bool IsBlockedSystemKey(int vkCode)
@@ -390,10 +416,79 @@ public partial class MainWindow : Window
             TypedText.Inlines.Add(newestInline);
             _typedInlines.Add(newestInline);
             EmptyHint.Visibility = Visibility.Collapsed;
+            ApplyNextBackgroundTheme(forceDifferent: true);
             return;
         }
 
         EmptyHint.Visibility = Visibility.Visible;
+        ApplyNextBackgroundTheme(forceDifferent: true);
+    }
+
+    private void ApplyNextBackgroundTheme(bool forceDifferent)
+    {
+        if (BackgroundThemes.Length == 0)
+        {
+            return;
+        }
+
+        int next = _random.Next(BackgroundThemes.Length);
+        if (forceDifferent && BackgroundThemes.Length > 1 && next == _backgroundThemeIndex)
+        {
+            next = (next + 1 + _random.Next(BackgroundThemes.Length - 1)) % BackgroundThemes.Length;
+        }
+
+        _backgroundThemeIndex = next;
+        (Color start, Color mid, Color end) = BackgroundThemes[_backgroundThemeIndex];
+
+        LinearGradientBrush brush = new()
+        {
+            StartPoint = new Point(0, 0),
+            EndPoint = new Point(1, 1),
+        };
+        brush.GradientStops.Add(new GradientStop(start, 0));
+        brush.GradientStops.Add(new GradientStop(mid, 0.45));
+        brush.GradientStops.Add(new GradientStop(end, 1));
+        brush.Freeze();
+        RootGrid.Background = brush;
+    }
+
+    private async Task CaptureAndSaveScreenshotAsync()
+    {
+        try
+        {
+            await Task.Delay(40);
+
+            int width = (int)Math.Max(1, RootGrid.ActualWidth);
+            int height = (int)Math.Max(1, RootGrid.ActualHeight);
+
+            RenderTargetBitmap bitmap = new(width, height, 96, 96, PixelFormats.Pbgra32);
+            bitmap.Render(RootGrid);
+
+            string baseDir = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+            string outputDir = Path.Combine(baseDir, "Keylet");
+            Directory.CreateDirectory(outputDir);
+
+            string baseName = $"keylet-{DateTime.Now:yyyy-MM-dd-HH-mm-ss}";
+            string filePath = Path.Combine(outputDir, $"{baseName}.png");
+            int suffix = 1;
+            while (File.Exists(filePath))
+            {
+                filePath = Path.Combine(outputDir, $"{baseName}-{suffix}.png");
+                suffix++;
+            }
+
+            PngBitmapEncoder encoder = new();
+            encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            using FileStream fileStream = new(filePath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            encoder.Save(fileStream);
+
+            await ShowTemporaryStatusAsync("Saved photo");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"KEYLET: screenshot failed: {ex.Message}");
+            await ShowTemporaryStatusAsync("Couldn't save photo");
+        }
     }
 
     private string? TryGetText(int vkCode, uint scanCode)

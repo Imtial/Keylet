@@ -10,7 +10,7 @@
         Cursor="None"
         Loaded="OnLoaded"
         Closed="OnClosed">
-    <Grid>
+    <Grid x:Name="RootGrid">
         <Grid.Background>
             <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
                 <GradientStop Color="#20113A" Offset="0" />
