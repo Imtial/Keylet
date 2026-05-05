@@ -1,9 +1,17 @@
 # Keylet
 
-My one-year-old climbs into my lap and smashes the keyboard with tiny hands.
+Every time my one-year-old sees me working, he climbs into my lap and starts smashing my keyboard with full confidence.
 
-Unplugging works, until I forget to plug it back in and wonder why my typing does nothing.
+My emergency move is unplugging the keyboard. It works, he gets bored when nothing happens, and eventually leaves.
 
-Keylet is the nicer trick: open a big colorful typing playground, let the baby mash away, and keep Windows mostly out of trouble.
+Then I forget to plug it back in, type a few keys, and spend a very confusing moment wondering why nothing works.
+
+Keylet is the nicer fix: open a big colorful typing playground, let the baby mash away safely, and keep Windows mostly out of trouble.
 
 Parent exit: `Ctrl + Alt + T + 9`
+
+## Warning
+
+- `Win + G` (Xbox Game Bar) cannot be reliably blocked by Keylet while running.
+- Disable Xbox Game Bar manually in Windows settings before using Keylet if `Win + G` is a concern.
+- Keylet asks for administrator privilege at startup to temporarily disable Windows lock (`Win + L`) via policy and restores it on exit.

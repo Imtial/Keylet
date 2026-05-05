@@ -1,6 +1,11 @@
 using System.Diagnostics;
+using System.ComponentModel;
+using Microsoft.Win32;
 using System.Runtime.InteropServices;
+using System.Security;
+using System.Security.Principal;
 using System.Text;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Documents;
 using System.Windows.Media;
@@ -80,6 +85,9 @@ public partial class MainWindow : Window
     private ToggleKeys _startupToggleKeys;
     private FilterKeys _startupFilterKeys;
     private bool _hasAccessibilitySnapshot;
+    private bool _canManageLockShortcutPolicy;
+    private string? _startupNotice;
+    private int? _startupDisableLockWorkstation;
 
     public MainWindow()
     {
@@ -94,8 +102,19 @@ public partial class MainWindow : Window
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        if (!EnsureElevatedOrRelaunch())
+        {
+            Close();
+            return;
+        }
+
         CaptureAccessibilitySettings();
         SetAccessibilityHotkeysEnabled(false);
+        if (_canManageLockShortcutPolicy)
+        {
+            CaptureLockShortcutSettings();
+            SetLockShortcutSettingsEnabled(false);
+        }
 
         Show();
         WindowState = WindowState.Maximized;
@@ -103,6 +122,13 @@ public partial class MainWindow : Window
         Activate();
         Focus();
         _keyboardHook = SetKeyboardHook(_keyboardProc);
+        if (_keyboardHook == IntPtr.Zero)
+        {
+            Debug.WriteLine("KEYLET: keyboard hook install failed.");
+            MessageBox.Show("Keyboard hook could not be installed. Key blocking will not work.", "Keylet", MessageBoxButton.OK, MessageBoxImage.Error);
+            Close();
+            return;
+        }
 
         Dispatcher.BeginInvoke(() =>
         {
@@ -110,11 +136,97 @@ public partial class MainWindow : Window
             Activate();
             Focus();
         }, DispatcherPriority.ApplicationIdle);
+
+        if (!string.IsNullOrWhiteSpace(_startupNotice))
+        {
+            _ = ShowTemporaryStatusAsync(_startupNotice);
+        }
+    }
+
+    private bool EnsureElevatedOrRelaunch()
+    {
+        if (IsRunningAsAdministrator())
+        {
+            _canManageLockShortcutPolicy = true;
+            return true;
+        }
+
+        string exePath = Process.GetCurrentProcess().MainModule?.FileName ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(exePath))
+        {
+            MessageBox.Show("Could not determine executable path for elevation.", "Keylet", MessageBoxButton.OK, MessageBoxImage.Error);
+            return false;
+        }
+
+        string[] args = Environment.GetCommandLineArgs();
+        string forwardedArgs = string.Join(" ", args.Skip(1).Select(QuoteArgument));
+
+        try
+        {
+            ProcessStartInfo startInfo = new()
+            {
+                FileName = exePath,
+                Arguments = forwardedArgs,
+                UseShellExecute = true,
+                Verb = "runas",
+            };
+
+            Process.Start(startInfo);
+            return false;
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            _canManageLockShortcutPolicy = false;
+            _startupNotice = "Win+L still works. Tap Allow next time to block it.";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"KEYLET: elevation request failed: {ex.Message}");
+            _canManageLockShortcutPolicy = false;
+            _startupNotice = "Win+L still works. Tap Allow next time to block it.";
+            return true;
+        }
+    }
+
+    private async Task ShowTemporaryStatusAsync(string message)
+    {
+        StatusToast.Text = message;
+        StatusToast.Visibility = Visibility.Visible;
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        StatusToast.Visibility = Visibility.Collapsed;
+    }
+
+    private static bool IsRunningAsAdministrator()
+    {
+        using WindowsIdentity identity = WindowsIdentity.GetCurrent();
+        WindowsPrincipal principal = new(identity);
+        return principal.IsInRole(WindowsBuiltInRole.Administrator);
+    }
+
+    private static string QuoteArgument(string argument)
+    {
+        if (argument.Length == 0)
+        {
+            return "\"\"";
+        }
+
+        bool needsQuotes = argument.Any(char.IsWhiteSpace) || argument.Contains('"');
+        if (!needsQuotes)
+        {
+            return argument;
+        }
+
+        return $"\"{argument.Replace("\"", "\\\"")}\"";
     }
 
     private void OnClosed(object? sender, EventArgs e)
     {
         SetAccessibilityHotkeysEnabled(true);
+        if (_canManageLockShortcutPolicy)
+        {
+            SetLockShortcutSettingsEnabled(true);
+        }
 
         if (_keyboardHook != IntPtr.Zero)
         {
@@ -141,7 +253,6 @@ public partial class MainWindow : Window
 
         KbdLlHookStruct info = Marshal.PtrToStructure<KbdLlHookStruct>(lParam);
         int vkCode = (int)info.vkCode;
-
         if (isKeyDown)
         {
             _pressedKeys.Add(vkCode);
@@ -350,6 +461,77 @@ public partial class MainWindow : Window
     }
 
     private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    private void CaptureLockShortcutSettings()
+    {
+        _startupDisableLockWorkstation = ReadDwordValue(Registry.CurrentUser, @"Software\Microsoft\Windows\CurrentVersion\Policies\System", "DisableLockWorkstation");
+    }
+
+    private void SetLockShortcutSettingsEnabled(bool enabled)
+    {
+        if (enabled)
+        {
+            RestoreDwordValue(Registry.CurrentUser, @"Software\Microsoft\Windows\CurrentVersion\Policies\System", "DisableLockWorkstation", _startupDisableLockWorkstation);
+            return;
+        }
+
+        // Disable lock shortcut (Win+L) while Keylet is active.
+        WriteDwordValue(Registry.CurrentUser, @"Software\Microsoft\Windows\CurrentVersion\Policies\System", "DisableLockWorkstation", 1);
+    }
+
+    private static int? ReadDwordValue(RegistryKey root, string subKey, string valueName)
+    {
+        using RegistryKey? key = root.OpenSubKey(subKey, writable: false);
+        object? value = key?.GetValue(valueName);
+
+        if (value is int intValue)
+        {
+            return intValue;
+        }
+
+        return null;
+    }
+
+    private static void WriteDwordValue(RegistryKey root, string subKey, string valueName, int value)
+    {
+        try
+        {
+            using RegistryKey key = root.CreateSubKey(subKey, writable: true)!;
+            key.SetValue(valueName, value, RegistryValueKind.DWord);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Skip keys protected by policy ACLs.
+        }
+        catch (SecurityException)
+        {
+            // Skip keys blocked by security policy.
+        }
+    }
+
+    private static void RestoreDwordValue(RegistryKey root, string subKey, string valueName, int? priorValue)
+    {
+        try
+        {
+            using RegistryKey key = root.CreateSubKey(subKey, writable: true)!;
+
+            if (priorValue.HasValue)
+            {
+                key.SetValue(valueName, priorValue.Value, RegistryValueKind.DWord);
+                return;
+            }
+
+            key.DeleteValue(valueName, throwOnMissingValue: false);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Skip keys protected by policy ACLs.
+        }
+        catch (SecurityException)
+        {
+            // Skip keys blocked by security policy.
+        }
+    }
 
     private void CaptureAccessibilitySettings()
     {
