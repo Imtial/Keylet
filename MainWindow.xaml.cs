@@ -6,8 +6,8 @@ using System.Runtime.InteropServices;
 using System.Security;
 using System.Security.Principal;
 using System.Text;
-using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media.Imaging;
 using System.Windows.Media;
@@ -17,6 +17,7 @@ namespace Keylet;
 
 public partial class MainWindow : Window
 {
+    private const double LetterGapWidth = 8;
     private const int WH_KEYBOARD_LL = 13;
     private const int WM_KEYDOWN = 0x0100;
     private const int WM_KEYUP = 0x0101;
@@ -80,11 +81,12 @@ public partial class MainWindow : Window
     ];
     private static readonly (Color Start, Color Mid, Color End)[] BackgroundThemes =
     [
-        (Color.FromRgb(20, 10, 38), Color.FromRgb(13, 33, 61), Color.FromRgb(11, 44, 34)),
-        (Color.FromRgb(27, 14, 45), Color.FromRgb(20, 44, 74), Color.FromRgb(17, 50, 36)),
-        (Color.FromRgb(42, 16, 35), Color.FromRgb(16, 45, 75), Color.FromRgb(18, 59, 39)),
-        (Color.FromRgb(14, 20, 52), Color.FromRgb(11, 46, 71), Color.FromRgb(25, 52, 33)),
-        (Color.FromRgb(34, 16, 26), Color.FromRgb(20, 39, 68), Color.FromRgb(21, 56, 44)),
+        (Color.FromRgb(166, 58, 95), Color.FromRgb(88, 69, 183), Color.FromRgb(42, 122, 158)),
+        (Color.FromRgb(204, 83, 51), Color.FromRgb(175, 76, 168), Color.FromRgb(59, 123, 186)),
+        (Color.FromRgb(194, 70, 107), Color.FromRgb(106, 64, 190), Color.FromRgb(39, 146, 144)),
+        (Color.FromRgb(210, 106, 43), Color.FromRgb(189, 66, 145), Color.FromRgb(66, 118, 194)),
+        (Color.FromRgb(150, 66, 178), Color.FromRgb(65, 116, 202), Color.FromRgb(39, 142, 112)),
+        (Color.FromRgb(203, 82, 86), Color.FromRgb(119, 63, 195), Color.FromRgb(46, 136, 177)),
     ];
 
     private readonly List<Inline> _typedInlines = [];
@@ -111,6 +113,7 @@ public partial class MainWindow : Window
         {
             brush.Freeze();
         }
+
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
@@ -360,10 +363,23 @@ public partial class MainWindow : Window
             Run run = new(character.ToString())
             {
                 Foreground = Palette[_colorIndex++ % Palette.Length],
-                FontSize = character == ' ' ? 102 : 94 + ((_colorIndex % 4) * 7),
+                FontSize = character == ' ' ? 110 : 92 + ((_colorIndex % 4) * 14),
             };
+            if (character == ' ')
+            {
+                AddInline(run);
+                continue;
+            }
 
-            AddInline(run);
+            Span token = new();
+            token.Inlines.Add(run);
+            token.Inlines.Add(new InlineUIContainer(new Border
+            {
+                Width = LetterGapWidth,
+                Height = 1,
+                Background = Brushes.Transparent,
+            }));
+            AddInline(token);
         }
     }
 
@@ -451,6 +467,7 @@ public partial class MainWindow : Window
         brush.Freeze();
         RootGrid.Background = brush;
     }
+
 
     private async Task CaptureAndSaveScreenshotAsync()
     {

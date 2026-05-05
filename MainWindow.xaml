@@ -22,8 +22,8 @@
         <Border Margin="44"
                 Padding="36"
                 CornerRadius="34"
-                Background="#D9141020"
-                BorderBrush="#66FFFFFF"
+                Background="#8A171B33"
+                BorderBrush="#B3FFFFFF"
                 BorderThickness="2">
             <Grid>
                 <Grid.RowDefinitions>
@@ -35,6 +35,7 @@
                            Grid.Row="0"
                            Text="Type something magical..."
                            FontFamily="Segoe Print, Comic Sans MS, Segoe UI"
+                           FontStretch="SemiExpanded"
                            FontSize="64"
                            FontWeight="Bold"
                            Foreground="#88FFFFFF"
@@ -44,11 +45,11 @@
 
                 <TextBlock x:Name="TypedText"
                            Grid.Row="0"
-                           ClipToBounds="True"
+                           ClipToBounds="False"
                            FontFamily="Segoe Print, Comic Sans MS, Segoe UI"
                            FontSize="102"
                            FontWeight="Bold"
-                           LineHeight="132"
+                           LineHeight="150"
                            LineStackingStrategy="BlockLineHeight"
                            Margin="0,0,0,20"
                            TextAlignment="Left"
